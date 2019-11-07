@@ -22,6 +22,7 @@ yum -y install openssl-devel
 yum -y install bzip2-devel
 
 # 安装lzma，否则编译出来的python在调用的时候会报 Could not import the lzma module. Your installed Python is incomplete
+# 这个模块好像没有也没关系，但是总是报WARN不好看
 yum -y install xz-devel
 ```
 
@@ -57,4 +58,11 @@ make install
 ``` bash
 export PYTHON_HOME=balabala
 export PATH=${PYTHON_HOME}/bin:${PYTHON_HOME}/bin
+```
+
+## 之后需要安装的一些需要的包，因为是做数据处理的
+
+``` bash
+pip3 install pandas
+pip3 install xlrd
 ```
