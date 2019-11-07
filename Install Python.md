@@ -20,6 +20,9 @@ yum -y install openssl-devel
 
 # 安装bzip2，否则编译出来的python在调用的时候会报找不到_bz2 module
 yum -y install bzip2-devel
+
+# 安装lzma，否则编译出来的python在调用的时候会报 Could not import the lzma module. Your installed Python is incomplete
+yum -y install xz-devel
 ```
 
 ## 完成准备工作后使用源码安装python
