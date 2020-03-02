@@ -3,7 +3,7 @@
 ## 1. 安装
 
 ``` text
-从hive官网根据操作下载stable版本的tar包解压到自己指定的目录，版本和环境按需自行配置
+从hive官网根据操作下载stable版本的tar包解压到自己指定的目录，版本和环境按需自行配置，本次文档使用的包：apache-hive-2.3.6-bin.tar.gz
 ```
 
 ## 2. 配置环境变量
@@ -64,20 +64,65 @@ hadoop fs -mkdir /hive/querylog
 ``` xml
 <!-- hive 临时目录hdfs路径 -->
 <property>
-    <name>hive.exec.scratchdir</name>
-    <value>/hive/tmp</value>
-    <description>HDFS root scratch dir for Hive jobs which gets created with write all (733) permission. For each connecting user, an HDFS scratch dir: ${hive.exec.scratchdir}/&lt;username&gt; is created, with ${hive.scratch.dir.permission}.</description>
+  <name>hive.exec.scratchdir</name>
+  <value>/hive/tmp</value>
+  <description>HDFS root scratch dir for Hive jobs which gets created with write all (733) permission. For each connecting user, an HDFS scratch dir: ${hive.exec.scratchdir}/&lt;username&gt; is created, with ${hive.scratch.dir.permission}.</description>
 </property>
 <!-- hive 存放数据的hdfs路径 -->
 <property>
-    <name>hive.metastore.warehouse.dir</name>
-    <value>/hive/warehouse</value>
-    <description>location of default database for the warehouse</description>
+  <name>hive.metastore.warehouse.dir</name>
+  <value>/hive/warehouse</value>
+  <description>location of default database for the warehouse</description>
 </property>
 <!-- hive 查询日志路径 该路径为本地路径 -->
 <property>
-    <name>hive.querylog.location</name>
-    <value>/localLogPath</value>
-    <description>Location of Hive run time structured log file</description>
+  <name>hive.querylog.location</name>
+  <value>/localLogPath</value>
+  <description>Location of Hive run time structured log file</description>
+</property>
+
+<!-- hive metastore 配置，需要使用本地ysql数据库 -->
+<property>
+  <name>javax.jdo.option.ConnectionURL</name>
+  <value>jdbc:mysql://localhost:3306/hive?createDatabaseIfNotExist=true</value>
+  <description>
+    JDBC connect string for a JDBC metastore.
+    To use SSL to encrypt/authenticate the connection, provide database-specific SSL flag in the connection URL.
+    For example, jdbc:postgresql://myhost/db?ssl=true for postgres database.
+  </description>
+</property>
+<!-- 配置 Mysql 驱动，之后需要将 mysql-connection-java.jar 文件放到hive下的lib目录中，确保hive可以找到 jdbc 驱动 -->
+<property>
+  <name>javax.jdo.option.ConnectionDriverName</name>
+  <value>com.mysql.jdbc.Driver</value>
+  <description>Driver class name for a JDBC metastore</description>
+</property>
+<!-- Mysql 用户名 -->
+<property>
+  <name>javax.jdo.option.ConnectionUserName</name>
+  <value>username</value>
+  <description>Username to use against metastore database</description>
+</property>
+<!-- Mysql 密码 -->
+<property>
+  <name>javax.jdo.option.ConnectionPassword</name>
+  <value>password</value>
+  <description>password to use against metastore database</description>
+</property>
+<property>
+  <name>datanucleus.schema.autoCreateAll</name>
+  <value>true</value>
+  <description>Auto creates necessary schema on a startup if one doesn't exist. Set this to false, after creating it once.To enable auto create also set hive.metastore.schema.verification=false. Auto creation is not recommended for production use cases, run schematool command instead.</description>
+</property>
+<property>
+  <name>hive.metastore.schema.verification</name>
+  <value>false</value>
+  <description>
+    Enforce metastore schema version consistency.
+    True: Verify that version information stored in is compatible with one from Hive jars.  Also disable automatic
+          schema migration attempt. Users are required to manually migrate schema after Hive upgrade which ensures
+          proper metastore schema migration. (Default)
+    False: Warn if the version information stored in metastore doesn't match with one from in Hive jars.
+  </description>
 </property>
 ```
