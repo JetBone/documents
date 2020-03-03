@@ -1,10 +1,27 @@
 # HIVE 安装与配置
 
-## 1. 安装
+## 1. Hive 介绍
 
-``` text
-从hive官网根据操作下载stable版本的tar包解压到自己指定的目录，版本和环境按需自行配置，本次文档使用的包：apache-hive-2.3.6-bin.tar.gz
-```
+### 1.1 什么是 Hive
+
+Hive 是一种存储大型分布式数据集的数据仓库，使用SQL语言进行读写。底层使用HDFS或者HBase进行数据存储
+
+### 1.2 Hive 的组成
+
+介绍在部署 Hive 的时候需要下载的 package：
+
+- hive - 基础包，提供完整的语言支持和运行环境
+- hive-metastore - 可选，提供了可以独立部署 Hive MetaStore Service 的脚本
+- hive-service2 - 提供脚本支持启动 HiveService2
+- hive-hbasehive-hbase - 可选，如果 Hive 底层对接的是 Hbase 则需要下载该包
+
+> 注意：建议 Hive MetaStore Service 独立部署，因为有些其它服务会依赖于这个服务，并且 Hive MetaStore Service 独立部署有利于单独维护 metadata database 配置
+
+## 2. HIVE 部署方式
+
+- Embedded Mode
+
+### 2.1 Embended
 
 ## 2. 配置环境变量
 
@@ -17,7 +34,9 @@ export HIVE_HOME=/your_hive_path
 export PATH=$HIVE_HOME/bin:$PATH
 ```
 
-## 3. 配置 Hive
+## 3. Hive 部署
+
+从hive官网根据操作下载stable版本的tar包解压到自己指定的目录，版本和环境按需自行配置，本次文档使用的包：apache-hive-2.3.6-bin.tar.gz
 
 ### 3.1 配置 hive-env.sh 文件
 
@@ -91,10 +110,10 @@ hadoop fs -mkdir /hive/querylog
     For example, jdbc:postgresql://myhost/db?ssl=true for postgres database.
   </description>
 </property>
-<!-- 配置 Mysql 驱动，之后需要将 mysql-connection-java.jar 文件放到hive下的lib目录中，确保hive可以找到 jdbc 驱动 -->
+<!-- 配置 Mysql 驱动，之后需要将 mysql-connection-java.jar 文件放到hive下的lib目录中，确保hive可以找到 jdbc 驱动com.mysql.jdbc.Driver 和 com.mysql.cj.jdbc.Driver 是一个效果，但是使用前者会收到一个警告，具体信息请直接看警告内容 -->
 <property>
   <name>javax.jdo.option.ConnectionDriverName</name>
-  <value>com.mysql.jdbc.Driver</value>
+  <value>com.mysql.cj.jdbc.Driver</value>
   <description>Driver class name for a JDBC metastore</description>
 </property>
 <!-- Mysql 用户名 -->
@@ -126,3 +145,7 @@ hadoop fs -mkdir /hive/querylog
   </description>
 </property>
 ```
+
+### 3.6 配置 hive 日志
+
+复制 hive-log4j2.properties.template 为 hive-log4j2.properties 按需修改里面的配置即可
