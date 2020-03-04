@@ -77,52 +77,110 @@ Remote Mode 主要优点是，JDBC 的登陆信息只保存在 The Metastore Ser
 
 这里使用 Remote Mode 进行部署，所以我们需要三个服务，HiveServer2，Hive Metastore Service，Mysql。Mysql这里不做叙述，所以本篇文章直讲前两个服务的部署步骤
 
-### 3.1 从官方文档下载安装包
+### 3.1 从官方文档下载稳定版的安装包
 
-官方地址：http://mirror.bit.edu.cn/apache/hive/
+官方地址：http://mirror.bit.edu.cn/apache/hive/stable-2/
 
 - hive 包：apache-hive-2.3.6-bin.tar.gz
-- hive-metastore 包：hive-standalone-metastore-3.0.0-bin.tar.gz
 
-> ***hive 包提供了 hive 所有的服务，hive-metastore 只提供了 metastore 服务。也就是说其实我们只需要第一个 hive 包，然后复制多份，其中一个用来部署独立的 metastore 服务，剩下的启动 HiveServer2 服务即可。但是我这里一开始以为两个服务需要分开下载，所以下载了两个包，而且hive包大概200M+，而metastore包只有25M左右，我部署的hive和metastore服务在同一台机器上，既然下载下来了，就先按照这样的方式部署吧。***
+一个 hive 包既可以启动 metastore 服务，也可以启动 hiveserver2 服务。所以我们的部署方式可以是：
 
-### 3.2 设置全局变量
+1. 一台机器一个包，启动两个服务
+2. 一台服务器里的两个包，启动两个服务
+3. 分别在不同的服务器中启动不同服务，每个服务器中只启动一个服务
+
+第一个方案看起来不错，虽然包不用复制了，但是配置文件总是要复制的，至少日志配置是需要复制的，并且还需要手动指定，否则两个进程同时写入同一个日志文件，肯定会出问题。至于hive-site.xml文件也许是不需要复制。假设不需要配置，那么我的 metastore uri 配置和数据库连接信息肯定会写到同一个文件里。我记得官方文档中写到如果配置了 hive.metastore.uris 属性，那么就会直接认为是 remote mode，也许数据库连接信息机会被忽略掉了吧。如果我启动的是 metastore 服务，那么 metastore.uris 配置也许就被忽略掉，该读取数据库连接信息了吧？综上所述，需要测试的东西有点多，也没有太多时间，pass
+
+第二个方案遇到的第一个问题是配置 HIVE_HOME 的时候，必然要配置两个，并且其中一个的启动命令需要重新命名，否则除非手动进入目录，不然你也不知道调用的 hive 命令是哪里的(当然配置环境变量的时候肯定找的是最前面的)。这样操作感觉不太好，所以第二个方案 pass
+
+第三个方案其实就是正常应该部署的方案，只不过想偷懒用前两个方案，结果思前想后，还是使用标准的部署方式吧。至少将来如果真的使用起来，也是这种部署方式。
+
+### 3.2 设置全局变量 (全节点相同)
 
 按需修改指定的环境变量文件，这里设置为全局变量，修改 /etc/profile
-这里将 metastore 放在 hive 前面
 
 ``` bash
-# 配置 HIVE METASTORE HOME
-export HIVE_METASTORE_HOME=/your_hive_metastore_path
 # 配置 HIVE HOME
 export HIVE_HOME=/your_hive_path
-# 配置 PATH，
-export PATH=HIVE_METASTORE_HOME/bin:$HIVE_HOME/bin:$PATH
+# 配置 PATH
+export PATH=$HIVE_HOME/bin:$PATH
 ```
 
-### 3.3 配置 metastore
+### 3.3 配置 hive-env.sh (全节点相同)
 
-#### 3.3.1 配置 metastore 日志
+将 hive-env.sh.template 复制并重命名 hive-env.sh 然后修改
 
-进入 metastore_home/conf 目录下修改 metastore-log4j2.properties 文件
+``` bash
+# HADOOP_HOME，如果已经定义了全局HADOOP_HOME则可以直接引用，否则需要写全路径
+HADOOP_HOME=$HADOOP_HOME
+# 配置文件存放路径
+HIVE_CONF_DIR=$HIVE_HOME/conf
+# hive需要使用到的jar包路径
+HIVE_AUX_JARS_PATH=$HIVE_HOME/lib
+```
+
+### 3.4 配置 hive 日志 (不同服务，配置不同)
+
+进入 hive_home/conf 目录下复制 hive-log4j2.properties.template 为 hive-log4j2.properties 并修改
 
 ``` properties
-property.metastore.log.dir=/your_log_dir
+property.hive.log.dir=/your_log_dir
+# 这里建议 metastore 服务将日志名改为 metastore.log，其它服务保持 hive.log 不变
+property.hive.log.file = hive.log
 ```
 
-#### 3.3.2 配置 metastore
+### 3.5 在 hdfs 中为 hive 新建一些目录以供使用
 
-进入 metastore_home/conf 目录下修改 metastore-site.xml 文件，并新增如下配置
+#### 3.5.1 为 hive 新建存放数据的目录
+
+在 hdfs 里为 hive 新建一个目录用于存放 hive 产生的数据
+
+``` bash
+hadoop fs -mkdir /hive/warehouse
+```
+
+#### 3.5.2 为 hive 新建存放临时文件的目录
+
+在 hdfs 里为 hive 新建一个用于存放临时文件的路径
+
+``` bash
+hadoop fs -mkdir /hive/tmp
+```
+
+#### 3.5.3 为 hive 新建存放日志的目录
+
+在 hdfs 里为 hive 新建一个用于存放查询日志的路径
+
+``` bash
+hadoop fs -mkdir /hive/querylog
+```
+
+### 3.6 配置 hive-site.xml (不同服务，配置不同)
+
+metastore 服务和 hiveserver2 服务的 hive-site.xml 配置略有不同
+
+#### 3.6.1 metastore 服务的 hive-site.xml 配置
+
+进入 hive_home/conf 目录下复制 hive-default.xml.template 为 metastore-site.xml 文件并新增如下配置
 
 ``` xml
-<!-- hive 存放数据的hdfs路径 -->
+<property>
+  <name>system:java.io.tmpdir</name>
+  <!-- 指定下文可用的${system:java.io.tmpdir}。默认对应 /tmp -->
+  <value>/home/bigdata/tmp/hive</value>
+</property>
+<property>
+  <name>hive.exec.scratchdir</name>
+  <value>/hive/tmp</value>
+  <description>HDFS root scratch dir for Hive jobs which gets created with write all (733) permission. For each connecting user, an HDFS scratch dir: ${hive.exec.scratchdir}/&lt;username&gt; is created, with ${hive.scratch.dir.permission}.</description>
+</property>
 <property>
   <name>hive.metastore.warehouse.dir</name>
   <value>/hive/warehouse</value>
   <description>location of default database for the warehouse</description>
 </property>
 
-<!-- hive metastore 配置 -->
+<!-- metadata database 数据库连接信息 -->
 <property>
   <name>javax.jdo.option.ConnectionURL</name>
   <value>jdbc:mysql://localhost:3306/hive?createDatabaseIfNotExist=true</value>
@@ -168,71 +226,63 @@ property.metastore.log.dir=/your_log_dir
 </property>
 ```
 
-### 3.1 配置 hive-env.sh 文件
-
-将 hive-env.sh.template 复制并重命名 hive-env.sh 然后修改
-
-``` bash
-# HADOOP_HOME，如果已经定义了全局HADOOP_HOME则可以直接引用，否则需要写全路径
-HADOOP_HOME=$HADOOP_HOME
-# 配置文件存放路径
-HIVE_CONF_DIR=$HIVE_HOME/conf
-# hive需要使用到的jar包路径
-HIVE_AUX_JARS_PATH==$HIVE_HOME/lib
-```
-
-### 3.2 为 hive 新建存放数据的目录
-
-在 hdfs 里为 hive 新建一个目录用于存放 hive 产生的数据
-
-``` bash
-hadoop fs -mkdir /hive/warehouse
-```
-
-### 3.3 为 hive 新建存放临时文件的目录
-
-在 hdfs 里为 hive 新建一个用于存放临时文件的路径
-
-
-``` bash
-hadoop fs -mkdir /hive/tmp
-```
-
-### 3.4 为 hive 新建存放日志的目录
-
-在 hdfs 里为 hive 新建一个用于存放查询日志的路径
-
-``` bash
-hadoop fs -mkdir /hive/querylog
-```
-
-### 3.5 配置 hive-site.xml 文件
-
-将 hive-default.xml.template 复制并重命名 hive-site.xml 然后修改部分数据，将上述三个目录配置到 hive 里
+#### 3.6.1 hiveserver2 服务的 hive-site.xml 配置
 
 ``` xml
-<!-- hive 临时目录hdfs路径 -->
+<property>
+  <name>system:java.io.tmpdir</name>
+  <!-- 指定下文可用的${system:java.io.tmpdir}。默认对应 /tmp -->
+  <value>/home/bigdata/tmp/hive</value>
+</property>
 <property>
   <name>hive.exec.scratchdir</name>
   <value>/hive/tmp</value>
   <description>HDFS root scratch dir for Hive jobs which gets created with write all (733) permission. For each connecting user, an HDFS scratch dir: ${hive.exec.scratchdir}/&lt;username&gt; is created, with ${hive.scratch.dir.permission}.</description>
 </property>
-<!-- hive 存放数据的hdfs路径 -->
 <property>
   <name>hive.metastore.warehouse.dir</name>
   <value>/hive/warehouse</value>
   <description>location of default database for the warehouse</description>
 </property>
-<!-- hive 查询日志路径 该路径为本地路径 -->
+
+<!-- 远程 metastore 服务 -->
 <property>
-  <name>hive.querylog.location</name>
-  <value>/localLogPath</value>
-  <description>Location of Hive run time structured log file</description>
+  <name>hive.metastore.uris</name>
+  <value>thrift://bdmaster:9083</value>
+  <description>Thrift URI for the remote metastore. Used by metastore client to connect to remote metastore.</description>
 </property>
-
-
 ```
 
-### 3.6 配置 hive 日志
+### 3.7 导入 Mysql 驱动
 
-复制 hive-log4j2.properties.template 为 hive-log4j2.properties 按需修改里面的配置即可
+mysql 驱动只需要在启动 metastore 服务的机器里进行配置即可
+将 mysql-connector-java.jar 放入 hive_home/lib 目录下即可
+mysql-connector-java.jar 自行下载
+
+### 3.8 启动 Hive 服务
+
+这里默认 hadoop 和 mysql 服务都已经启动成功
+
+#### 第一步，格式化数据库
+
+``` bash
+schemaTool -dbType mysql initSchema
+```
+
+#### 第二步，启动 metastore 服务
+
+``` bash
+# 正常启动命令
+hive --service metastore
+# 后台运行命令
+nohup hive --service metastore 2>&1 > /dev/null &
+```
+
+### 第三步，启动 hiveserver2 服务
+
+``` bash
+# 正常启动命令
+hiveserver2
+# 后台运行命令
+nohup hiveserver2 2>&1 > dev/null &
+```
