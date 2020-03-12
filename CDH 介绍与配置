@@ -162,4 +162,306 @@ Cloudera Manager monitor 会监控所有 service，role 的健康状态，并且
 
 #### 3.12.3 Events, Alerts, and Triggers
 
+### 4. 服务器环境配置
 
+服务器环境：
+
+| 服务器名称 | 系统 |
+| -------- | ---- |
+|  master  | CentOS-7-x86_64-Minimal-1908.iso |
+|  slave1  | CentOS-7-x86_64-Minimal-1908.iso |
+|  slave2  | CentOS-7-x86_64-Minimal-1908.iso |
+
+三台服务器全都是 基础版本的 CentOS 7，intel CPU，并且可以连接外网
+
+> CDH 环境对系统是有要求的，具体可以查看官方的文档，至少 64 位操作系统，ext4 文件系统是必须的
+
+#### 4.1 配置免密登陆（所有节点）
+
+服务器基础环境配置都是以 root 用户来进行操作的
+
+- **检查安装 ssh 服务**
+
+首先要确保自己的机器安装 ssh 服务，如果没有请使用 yum 安装
+minimal version 安装之后自动带有 ssh 服务，并且开启了远程 ssh 登陆，所以下面的安装命令只是一个示例
+
+``` bash
+yum -y install openssh-server openssh-clients
+```
+
+- **修改 ssh 服务配置**
+
+然后修改 sshd 配置，配置文件：/etc/ssh/sshd_config，将文件中的 PermitRootLogin，RSAAuthentication，PubkeyAuthentication 三个配置打开
+
+> 这里我没有修改我的配置，在我的配置文件当中并没有找到 RSAAuthentication 这个属性，其它两个配置虽然都处于被注释掉的情况，但是我还是将我的免密登陆配置成功了，之后也没有去调查具体原因，但是这里有必要将该过程进行记录下来，以便之后使用
+
+``` bash
+PermitRootLogin yes
+RSAAuthentication yes
+PubkeyAuthentication yes
+```
+
+- **生成 RSA 密钥对**
+
+``` bash
+# 该命令默认使用 RSA 加密方式，想使用其它加密方式请 man ssh-keygen 查看说明
+ssh-keygen
+```
+
+直接执行上述命令行，然后一直回车直到结束，如果需要指定特殊的 RSA namespace，请在生成过程中自己配置，具体请参考其它文章
+
+- **生成密钥对之后将公钥复制到另外两台服务器当中**
+
+生成的密钥对处于 ～/.ssh 目录下，～是当前用户的根目录，由于我们使用的是 root 用户，所以是 /root/.ssh。在该目录下，会生成两个文件，如果在生成密钥对的时候没有进行 namespace 的配置，那么默认是 id_rsa (保存私钥) 和 id_rsa.pub (保存公钥)
+
+在之前的 sshd_config 配置文件当中有如下配置，这个文件是用来保存其它服务器的 PubKey 的
+
+``` bash
+AuthorizedKeysFile      .ssh/authorized_keys
+```
+
+也就是和密钥对同一个目录下，检查发现并没有 authorized_keys 这个文件，很简单，我们使用 vi 命令新建一个同名文件，然后使用 cat 命令查看一下其它两个机器的 id_rsa.pub 文件，将里面的内容分别复制在新建的这个文件里，保存之后，公钥就配置结束了。三台电脑分别要保存另外两台电脑的公钥。
+
+- **启动或重启 ssh 服务**
+
+``` bash
+service sshd start/restart
+```
+
+#### 4.2 关闭 SELinux （所有节点）
+
+一开始我是没有关闭这个服务的，但是之后安装 mysql 的时候出现了一些奇怪的问题
+首次查看一下 selinux mode，如果是 Permissive 或者 Disabled，则可以跳过该步骤
+
+``` bash
+getenforce
+```
+
+如果是 enforcing，则需要临时关闭
+
+``` bash
+setenforce 0
+```
+
+如果需要永久关闭，则需要修改配置文件：/etc/selinux/config
+
+``` bash
+# This file controls the state of SELinux on the system.
+# SELINUX= can take one of these three values:
+#     enforcing - SELinux security policy is enforced.
+#     permissive - SELinux prints warnings instead of enforcing.
+#     disabled - No SELinux policy is loaded.
+SELINUX=disabled # 这一行修改成 permissive 或者 disabled
+# SELINUXTYPE= can take one of three values:
+#     targeted - Targeted processes are protected,
+#     minimum - Modification of targeted policy. Only selected processes are protected.
+#     mls - Multi Level Security protection.
+SELINUXTYPE=targeted
+```
+
+修改之后，重启电脑即可生效 \
+Cloudera 文档中说安装完成之后即可将该服务再重新启动，不过具体情况之后在分析
+
+#### 4.3 关闭防火墙（所有节点）
+
+在关闭之前我尝试不关闭防火墙进行安装操作，但是后续步骤有太多端口需要配置处理，所以最终还是决定关闭防火墙（Cloudera Manager 文档也要求先关闭防火墙，或者针对所有服务的端口都进行配置）
+
+``` bash
+# 关闭防火墙
+service firewalld stop
+# 关闭防火墙开机启动
+systemctl disable firewalld
+```
+
+#### 4.4 安装配置 ntp 服务（所有节点）
+
+CDH 服务默认是使用 ntp 来进行时间同步。
+CentOS 7 默认是使用 chrony 服务来同步时间，如果有安装 chrony 服务，CDH 会优先选择 chrony 服务，即使在安装了 ntp 的前提下。不过 ntp 推介使用 ntp 服务。
+
+- **检查是否有 chrony 服务，有则关闭或者删除**
+
+``` bash
+yum remove chrony
+```
+
+- **安装 ntp 服务（所有节点）**
+
+``` bash
+yum -y install ntp
+```
+
+- **修改 ntp 配置**
+
+正常来讲应该将整个集群的一个机器作为 所有机器的 ntp 上游服务器，然后该 ntp 服务器的上游为其它。
+
+修改主节点 ntp 配置文件：/etc/ntp.conf
+
+``` bash
+# 设置 ip-address 为下游 ntp 服务器ip，将 mask 设置为 255.255.255.255 说明指定了唯一IP，
+# 这里可以根据 mask 将前面的 ip 变为一个网段，这样就完成了整个网段的配置，这里我只有两台下游，所以直接使用 ip 指定
+restrict 下游IP1 mask 255.255.255.255 nomodify notrap
+restrict 下游IP2 mask 255.255.255.255 nomodify notrap
+
+# 注释掉原来的 server 开头的一系列配置
+server ntp1.aliyun.com prefer
+server ntp2.aliyun.com
+server ntp3.aliyun.com
+server ntp4.aliyun.com
+server ntp5.aliyun.com
+server ntp6.aliyun.com
+server ntp7.aliyun.com
+```
+
+配置下游 ntp 配置：/etc/ntp.conf
+
+``` bash
+server 主节点IP prefer
+```
+
+- **启动 ntp 服务**
+
+``` bash
+# 启动服务
+service ntpd start
+# 设置为开机启动
+systemctl enable ntpd.service
+```
+
+#### 4.5 安装 java （所有节点）
+
+Cloudera Manager 要求 Java 必须安装到 /usr/java 目录下 \
+并且最新且经过测试的 Java 版本为：1.8u181
+
+> 注意：由于 Java 指定了版本，所以不能使用 yum 直接进行下载，需要手动下载指定的包进行安装
+
+- **解压 jdk**
+
+``` bash
+tar -zxvf /opt/jdk-8u181-linux-x64.tar.gz -C /usr/java/
+```
+
+- **配置环境变量**
+
+``` bash
+# 编辑
+vim /etc/profile
+```
+
+在 profile 末尾添加
+
+``` bash
+# JAVA HOME
+export JAVA_HOME=/usr/java/jdk1.8.0_181
+
+# PATH
+export PATH=$JAVA_HOME/bin:$PATH
+```
+
+保存后 source
+
+``` bash
+source /etc/profile
+```
+
+测试一下
+
+``` bash
+java -version
+```
+
+显示如下
+
+``` bash
+java version "1.8.0_181"
+Java(TM) SE Runtime Environment (build 1.8.0_181-b13)
+Java HotSpot(TM) 64-Bit Server VM (build 25.181-b13, mixed mode)
+```
+
+#### 4.6 安装 mysql（只需要一个）
+
+mysql 只需要安装在 master 节点作为之后的 metadata database \
+经过 Cloudrea 验证的最新版本为：5.7
+
+经过反复安装（然后再删除）之后，建议使用 yum 安装 mysql，手动直接解压的免安装的 tar 包，还需要配置很多东西才能启动 mysql，工作量比较大，所以建议使用 yum 安装
+
+- **安装 mysql yum 源**
+
+在安装前需要先删除 CentOS 自带的 mariadb
+
+``` bash
+yum -y remove mariadb-libs
+```
+
+根据官方文档，需要手动安装 mysql 的 yum 源 \
+下载地址：https://dev.mysql.com/downloads/repo/yum/ \
+下载完成之后安装 yum 源
+
+``` bash
+rpm -Uvh mysql80-community-release-el7-3.noarch.rpm
+```
+
+> 这里看起来像是安装了一个 mysql 8.x 版本的 yum 源，实际上是包含所有 mysql 版本的 yum 源，只不过最新版本更新到了 mysql 8.x
+
+- **配置 yum 安装的 mysql 版本**
+
+首先看一看 mysql repo 是否安装成功
+
+``` bash
+yum repolist | grep mysql
+```
+
+结果为：
+
+``` bash
+mysql-connectors-community/x86_64       MySQL Connectors Community           141
+mysql-tools-community/x86_64            MySQL Tools Community                105
+mysql80-community/x86_64                MySQL 8.0 Community Server           161
+```
+
+安装成功了，但是版本是 mysql 8.0 版本，也就是说如果现在使用 yum 安装mysql，一定是安装的最新版本，所以我们需要修改一下 yum 配置来指定我们的版本
+
+- **修改 repo 配置，配置 mysql 版本为 5.7**
+
+修改文件：/etc/yum.repos.d/mysql-community.repo \
+找到如下代码
+
+``` bash
+[mysql57-community]
+name=MySQL 5.7 Community Server
+baseurl=http://repo.mysql.com/yum/mysql-5.7-community/el/7/$basearch/
+enabled=1 # 这里之前是0，现在修改为1
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-mysql
+
+[mysql80-community]
+name=MySQL 8.0 Community Server
+baseurl=http://repo.mysql.com/yum/mysql-8.0-community/el/7/$basearch/
+enabled=0 # 这里之前是1，现在修改为0
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-mysql
+```
+
+修改完成之后，再次调用 yum repolist | grep mysql 即可发现 mysql 版本已经更换。mysql yum 源安装成功。
+
+- **安装 mysql**
+
+ Cloudera 官网有说明对于 Mysql 5.7 版本需要安装 shared-compat 或者 shared 包，用于安装 Cloudra Manager Agent 服务。根据调查，shared 包就是 mysql-commnutiy-libs 包，所以最终需要安装的服务如下
+
+``` bash
+yum install mysql-community-{server,client,common,libs}-*
+```
+
+等待完整及安装结束
+
+- **启动并配置 mysql**
+
+实际上当我们安装完成 mysql 之后就会自动启动了
+
+初始化 root 密码并配置远程登陆
+
+``` sql
+use mysql;
+update user set password=PASSWORD('password') where user='root';
+GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' IDENTIFIED BY 'password' WITH GRANT OPTION;
+flush privileges;
+```
