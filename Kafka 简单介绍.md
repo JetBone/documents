@@ -39,7 +39,7 @@ kafka通常应用在两个大类场景：
 - replication-factor：该名词实际上是创建一个topic的时候，用来指定数据的备份数量的，用备份数量来描述也并不是特别准确，因为这里的数量是leader+follower的数量，而不是单纯指follower数量。需要注意的是，该参数不能大于broker数量
 
 Kafka 集群结构图
-![avatar](kafka-cluster.png)
+![avatar](img/kafka-cluster.png)
 
 ## 5. Kafka 常用场景
 

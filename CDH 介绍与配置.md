@@ -47,7 +47,7 @@ Cloudera Manager 是一个用于管理 CDH 集群的终端产品。通过 Cloude
 
 如下图所示，整个 Cloudera Manager 的核心是 Cloudera Manager Server，该 Server 提供了对外的 Admin Console Web 服务。同时还负责 Hadoop 生态圈中的其它服务的安装，配置，启动和关闭等
 
-![avatar](cloudera-manager.png)
+![avatar](img/cloudera-manager.png)
 
 具体组件介绍：
 
@@ -166,11 +166,11 @@ Cloudera Manager monitor 会监控所有 service，role 的健康状态，并且
 
 服务器环境：
 
-| 服务器名称 | 系统 |
-| -------- | ---- |
-|  master  | CentOS-7-x86_64-Minimal-1908.iso |
-|  slave1  | CentOS-7-x86_64-Minimal-1908.iso |
-|  slave2  | CentOS-7-x86_64-Minimal-1908.iso |
+| host | 系统 | cloudera 服务 | hadoop 角色 |
+| ---- | --- | ------------ | ----------- |
+|  master  | CentOS-7-x86_64-Minimal-1908.iso | server | namenode |
+|  slave1  | CentOS-7-x86_64-Minimal-1908.iso | agent | datanode |
+|  slave2  | CentOS-7-x86_64-Minimal-1908.iso | agent | datanode |
 
 三台服务器全都是 基础版本的 CentOS 7，intel CPU，并且可以连接外网
 
@@ -384,7 +384,9 @@ mysql 只需要安装在 master 节点作为之后的 metadata database \
 
 经过反复安装（然后再删除）之后，建议使用 yum 安装 mysql，手动直接解压的免安装的 tar 包，还需要配置很多东西才能启动 mysql，工作量比较大，所以建议使用 yum 安装
 
-- **安装 mysql yum 源**
+- **安装 mysql yum 源** （所有节点）
+
+mysql 的 yum 源建议在所有节点都配置，之后使用 yum 安装 Cloudera Manager 服务的时候，会下载有关 mysql 的依赖，为了保证所下载的依赖和安装的 mysql 版本完全对应，请务必在各个节点都配置mysql 的 yum 源，并且把版本都设置为一样的。
 
 在安装前需要先删除 CentOS 自带的 mariadb
 
@@ -453,15 +455,480 @@ yum install mysql-community-{server,client,common,libs}-*
 
 等待完整及安装结束
 
-- **启动并配置 mysql**
+- **启动 mysql**
 
-实际上当我们安装完成 mysql 之后就会自动启动了
+``` bash
+service mysqld start
+```
 
-初始化 root 密码并配置远程登陆
+- **初始化 root 密码并配置远程登陆**
+
+启动之后，mysql 5.7 版本会给 root 用户分配一个临时密码，这个密码需要在 /var/log/mysqld.log 文件中搜索 temporary password 找到，找到之后使用临时密码登陆，登陆之后第一件事就是修改 root 密码，不修改密码 mysql 也不会允许你干其它事情。
+
+``` sql
+set password=PASSWORD('your_new_password');
+```
+
+修改完成后，配置 root 用户远程登陆
 
 ``` sql
 use mysql;
-update user set password=PASSWORD('password') where user='root';
+update user set password=PASSWORD('your_new_password') where user='root';
 GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' IDENTIFIED BY 'password' WITH GRANT OPTION;
 flush privileges;
 ```
+
+### 5. 安装 Cloudera Manager
+
+上述环境配置完成之后，正式开始安装 CDH 环境，但是在安装 CDH 之前，首先要安装 Cloudera Manager，使用 Cloudera Manager 来安装 CDH
+
+手动安装 Cloudera Manager 还需要配置一些用户和目录，操作比较繁琐，所以我们使用官方文档描述的 yum 的方式来安装 Cloudera Manager 6.2.1 版本，但是 rpm 包特别大，直接用 yum 来下载反而会特别慢，所以做一个折中选择。配置 yum 源，但是 rpm 包自己下载，然后使用 yum 安装本地 rpm 包，用 yum 帮我们解决依赖问题。
+
+#### 5.1 安装 yum 源（所有节点）
+
+- **下载 yum 源**
+
+从官网下载 Cloudera Manager yum 源 \
+官方文档：https://docs.cloudera.com/documentation/enterprise/6/release-notes/topics/rg_cm_6_version_download.html \
+
+官方举例
+``` bash
+wget <repo_file_url> -P /etc/yum.repos.d/
+```
+
+由于我们没有 wget 命令，所以也没安装，我使用自己电脑下载了 repo 文件然后scp到这个目录下 \
+repo 文件：cloudera-manager.repo
+
+可以打开这个文件简单看一下内容
+
+``` bash
+[cloudera-manager]
+name=Cloudera Manager 6.3.1
+baseurl=https://archive.cloudera.com/cm6/6.3.1/redhat7/yum/
+gpgkey=https://archive.cloudera.com/cm6/6.3.1/redhat7/yum/RPM-GPG-KEY-cloudera
+gpgcheck=1
+enabled=1
+autorefresh=0
+```
+
+看来只能下载 6.2.1 了，不能像 mysql 那样随心所欲配置版本，怪不得官方每个版本都提供一个 repo 文件
+
+- **导入 GPG Key**
+
+比 mysql 多一步，应该是用来认证的
+
+``` bash
+rpm --import https://archive.cloudera.com/cm6/6.2.1/redhat7/yum/RPM-GPG-KEY-cloudera
+```
+
+> 注意：官方文档给的是 6.x 的文档，里面举的例子是 6.0.0 的，所以我们不能直接复制给出的 url，我们实际需要的 url 其实在我上面提到的官方文档网址里有给出，按照自己的需求找到即可
+
+#### 5.2 安装 Cloudera Manager RPM 包
+
+根据最一开始的 Clouderam Manager 整体介绍，我们至少要完成以下工作：
+
+1. 主 Cloudera Manager 节点安装 server，agent 服务
+2. 所有从节点 安装 agent 服务
+3. 配置 mysql 数据库，配置 Cloudera Manager 的数据库配置
+4. 启动 server 服务，启动所有 agent 服务
+
+- **下载 RPM 包**
+
+一共有三个包需要安装：cloudera-manager-server，cloudera-manager-agent，cloudera-manager-demons，所以下载三个 rpm 包即可
+
+官方下载地址：https://archive.cloudera.com/cm6/6.2.1/redhat7/yum/RPMS/x86_64/
+
+- **yum 安装服务**
+
+主节点需要安装全部三个包
+
+``` bash
+yum -y install cloudera-manager-daemons-6.2.1-1426065.el7.x86_64.rpm cloudera-manager-agent-6.2.1-1426065.el7.x86_64.rpm cloudera-manager-server-6.2.1-1426065.el7.x86_64.rpm
+```
+
+从节点不需要安装 server
+
+``` bash
+yum -y install cloudera-manager-daemons-6.2.1-1426065.el7.x86_64.rpm cloudera-manager-agent-6.2.1-1426065.el7.x86_64.rpm
+```
+
+查看已经安装好的包
+
+``` bash
+yum list installed | grep cloudera
+```
+
+安装完成
+
+#### 5.3 配置 mysql
+
+在安装完成之后还不能直接启动，需要配置 mysql 数据库，这一步其实可以在安装好 mysql 服务后直接进行配置。不过该步骤其实不完全属于环境配置，毕竟环境配置与 CDH 无关，所以我分割到这里来写。
+
+- **修改 mysql 配置**
+
+  Cloudera Manager 官方文档针对 mysql 有做以下几点要求
+
+  - 为了防止死锁，设置隔离级别（isolation level）为 READ-COMMITTED
+  - 配置 InnoDB 引擎，如果使用 MyISAM 引擎，Cloudera Manager 将会启动失败，并且如果没有配置 InnoDB，那么默认会使用 MyISAM（好像现在默认都是 InnoDB 引擎了，不过官方文档这么写了，我还是按照官方文档的进行一下配置）
+  - 大多数 mysql 默认设置的缓存大小（buffer size）和内存使用率（memory usage）都比较保守稳定，但是 Cloudera Manager 会进行大量的写入操作，所以建议将 innodb_flush_method 配置为 O_DIRECT
+  - 最大连接数（max_connections）属性取决于集群的规模：
+    - 如果小于 50 台机器，你可以将所有的 database 都建立在同一台 host 里
+      - 最好每个数据库都物理隔离
+      - 每一个数据库都应该分配 100 个连接数，并 添加 50 个额外连接数。举个例子，假设在单个 mysql 服务器需要建立两个 database，则最大连接数应该设置为 250。如果要建立五个 database（Cloudera Manager Server, Activity Monitor, Reports Manager, Cloudera Navigator, and Hive metastore）那么应该设置为 550
+    - 超过 50 台机器，请不要将数据库都建立在一个数据库服务器里，至少不是同一个 host，
+  - 如果集群规模超过 1000 台机器，设置 max_allowed_packet 为 16M，否则集群将会启动失败并抛出以下异常：com.mysql.jdbc.PacketTooBigException
+  - 二进制日志（Binary logging）记录对于 Cloudera Manager 的安装不是必需的，按自己需求配置即可
+
+官方推介配置：
+
+``` ini
+[mysqld]
+datadir=/var/lib/mysql
+socket=/var/lib/mysql/mysql.sock
+transaction-isolation = READ-COMMITTED
+# Disabling symbolic-links is recommended to prevent assorted security risks;
+# to do so, uncomment this line:
+symbolic-links = 0
+
+key_buffer_size = 32M
+max_allowed_packet = 32M
+thread_stack = 256K
+thread_cache_size = 64
+query_cache_limit = 8M
+query_cache_size = 64M
+query_cache_type = 1
+
+max_connections = 550
+#expire_logs_days = 10
+#max_binlog_size = 100M
+
+#log_bin should be on a disk with enough free space.
+#Replace '/var/lib/mysql/mysql_binary_log' with an appropriate path for your
+#system and chown the specified folder to the mysql user.
+log_bin=/var/lib/mysql/mysql_binary_log
+
+#In later versions of MySQL, if you enable the binary log and do not set
+#a server_id, MySQL will not start. The server_id must be unique within
+#the replicating group.
+server_id=1
+
+binlog_format = mixed
+
+read_buffer_size = 2M
+read_rnd_buffer_size = 16M
+sort_buffer_size = 8M
+join_buffer_size = 8M
+
+# InnoDB settings
+innodb_file_per_table = 1
+innodb_flush_log_at_trx_commit  = 2
+innodb_log_buffer_size = 64M
+innodb_buffer_pool_size = 4G
+innodb_thread_concurrency = 8
+innodb_flush_method = O_DIRECT
+innodb_log_file_size = 512M
+
+[mysqld_safe]
+log-error=/var/log/mysqld.log
+pid-file=/var/run/mysqld/mysqld.pid
+
+sql_mode=STRICT_ALL_TABLES
+```
+
+根据上述配置文档，我们暂时不弃用二进制日志，所以不配置 log_bin, server_id, binlog_format 这三个配置。另外 sql_mode 在 5.7 版本默认为 STRICT_TRANS_TABLES，所以也不配置了，剩下的都按照上述文档来
+
+最终修改结果为：
+
+``` ini
+# For advice on how to change settings please see
+# http://dev.mysql.com/doc/refman/5.7/en/server-configuration-defaults.html
+
+[mysqld]
+#
+# Remove leading # and set to the amount of RAM for the most important data
+# cache in MySQL. Start at 70% of total RAM for dedicated server, else 10%.
+# innodb_buffer_pool_size = 128M
+#
+# Remove leading # to turn on a very important data integrity option: logging
+# changes to the binary log between backups.
+# log_bin
+#
+# Remove leading # to set options mainly useful for reporting servers.
+# The server defaults are faster for transactions and fast SELECTs.
+# Adjust sizes as needed, experiment to find the optimal values.
+# join_buffer_size = 128M
+# sort_buffer_size = 2M
+# read_rnd_buffer_size = 2M
+datadir=/var/lib/mysql
+socket=/var/lib/mysql/mysql.sock
+transaction-isolation = READ-COMMITTED
+
+# Disabling symbolic-links is recommended to prevent assorted security risks
+symbolic-links=0
+
+key_buffer_size = 32M
+max_allowed_packet = 32M
+thread_stack = 256K
+thread_cache_size = 64
+query_cache_limit = 8M
+query_cache_size = 64M
+query_cache_type = 1
+
+max_connections = 550
+
+read_buffer_size = 2M
+read_rnd_buffer_size = 16M
+sort_buffer_size = 8M
+join_buffer_size = 8M
+
+# InnoDB settings
+innodb_file_per_table = 1
+innodb_flush_log_at_trx_commit  = 2
+innodb_log_buffer_size = 64M
+innodb_buffer_pool_size = 4G
+innodb_thread_concurrency = 8
+innodb_flush_method = O_DIRECT
+innodb_log_file_size = 512M
+
+log-error=/var/log/mysqld.log
+pid-file=/var/run/mysqld/mysqld.pid
+```
+
+保存退出，重启数据库
+
+- **安装 JDBC 驱动** （所有节点）
+
+直接调用 yum install mysql-connector-java 其实就可以下载了，而且由于我们之前已经配置了 mysql 的 yum 源，下载的应该是符合版本要求的包，但是我在下载过程当中看到了依赖 openjdk，所以感到有些迷惑，因为我使用的 java 是 Oracle Java，并且是手动安装的，为了防止不必要的安装，这里选择手动安装 JDBC 驱动，官方文档也提供了手动安装的步骤。
+
+下载 JDBC 驱动：https://dev.mysql.com/downloads/connector/j/
+
+直接进入这个网址看到的是 8.x 的版本，点一下 **Looking for previous GA versions?** 连接，跳到之前的版本下载界面，Cloudera Manager 官方文档里使用的是 5.1.46，我这里下载的是 5.1.48
+
+解压 tar 包
+
+``` bash
+tar -zxvf mysql-connector-java-5.1.48.tar.gz
+```
+
+进入解压出来的目录里，复制 bin.jar 结尾的文件到 /usr/share/java 目录下，如果没有这个目录则手动建立，重命名 jar 文件为：mysql-connector-java.jar
+
+``` bash
+# 建立目录
+mkdir -p /usr/share/java/
+# 进入解压出来的目录
+cd mysql-connector-java-5.1.48
+# 复制并重命名 jar 包
+cp mysql-connector-java-5.1.48-bin.jar /usr/share/java/mysql-connector-java.jar
+```
+
+最后将此 jar 包放到其它节点的相同目录下即可
+
+- **创建 Cloudera Manager 和 CDH 需要的数据库 user 和 database**
+
+| Service | Database | User |
+| ------- | -------- | ---- |
+| Cloudera Manager Server | scm | scm |
+| Activity Monitor | amon | amon |
+| Reports Manager | rman | rman |
+| Hue | hue | hue |
+| Hive Metastore Server | metastore | hive |
+| Sentry Server | sentry | sentry |
+| Cloudera Navigator Audit Server | nav | nav |
+| Cloudera Navigator Metadata Server | navms | navms |
+| Oozie | oozie | oozie |
+
+``` sql
+CREATE DATABASE scm DEFAULT CHARACTER SET utf8 DEFAULT COLLATE utf8_general_ci;
+GRANT ALL ON scm.* TO 'scm'@'%' IDENTIFIED BY '1qaz@WSX';
+
+CREATE DATABASE amon DEFAULT CHARACTER SET utf8 DEFAULT COLLATE utf8_general_ci;
+GRANT ALL ON amon.* TO 'amon'@'%' IDENTIFIED BY '1qaz@WSX';
+
+CREATE DATABASE rman DEFAULT CHARACTER SET utf8 DEFAULT COLLATE utf8_general_ci;
+GRANT ALL ON rman.* TO 'rman'@'%' IDENTIFIED BY '1qaz@WSX';
+
+CREATE DATABASE hue DEFAULT CHARACTER SET utf8 DEFAULT COLLATE utf8_general_ci;
+GRANT ALL ON hue.* TO 'hue'@'%' IDENTIFIED BY '1qaz@WSX';
+
+CREATE DATABASE metastore DEFAULT CHARACTER SET utf8 DEFAULT COLLATE utf8_general_ci;
+GRANT ALL ON metastore.* TO 'hive'@'%' IDENTIFIED BY '1qaz@WSX';
+
+CREATE DATABASE sentry DEFAULT CHARACTER SET utf8 DEFAULT COLLATE utf8_general_ci;
+GRANT ALL ON sentry.* TO 'sentry'@'%' IDENTIFIED BY '1qaz@WSX';
+
+CREATE DATABASE nav DEFAULT CHARACTER SET utf8 DEFAULT COLLATE utf8_general_ci;
+GRANT ALL ON nav.* TO 'nav'@'%' IDENTIFIED BY '1qaz@WSX';
+
+CREATE DATABASE navms DEFAULT CHARACTER SET utf8 DEFAULT COLLATE utf8_general_ci;
+GRANT ALL ON navms.* TO 'navms'@'%' IDENTIFIED BY '1qaz@WSX';
+
+CREATE DATABASE oozie DEFAULT CHARACTER SET utf8 DEFAULT COLLATE utf8_general_ci;
+GRANT ALL ON oozie.* TO 'oozie'@'%' IDENTIFIED BY '1qaz@WSX';
+```
+
+- **初始化数据库**
+
+之前安装的 Cloudera Manager Server 里自带了一个初始化数据库的脚本 \
+目录：/opt/cloudera/cm/schema/scm_prepare_database.sh
+
+这个脚本会完成一下 server 的初始化配置，虽然里面也会帮忙创建数据库，但是还是建议在前面手动创建
+
+执行脚本：
+
+``` bash
+# mysql 是数据库类型，scm 是 Cloudera Manager Server 需要的数据库名称，还有用户名
+./scm_prepare_database.sh mysql scm scm
+```
+
+结果：
+
+``` bash
+Enter SCM password: 
+JAVA_HOME=/usr/java/jdk1.8.0_181
+Verifying that we can write to /etc/cloudera-scm-server
+Creating SCM configuration file in /etc/cloudera-scm-server
+Executing:  /usr/java/jdk1.8.0_181/bin/java -cp /usr/share/java/mysql-connector-java.jar:/usr/share/java/oracle-connector-java.jar:/usr/share/java/postgresql-connector-java.jar:/opt/cloudera/cm/schema/../lib/* com.cloudera.enterprise.dbutil.DbCommandExecutor /etc/cloudera-scm-server/db.properties com.cloudera.cmf.db.
+Fri Mar 13 17:14:44 CST 2020 WARN: Establishing SSL connection without server's identity verification is not recommended. According to MySQL 5.5.45+, 5.6.26+ and 5.7.6+ requirements SSL connection must be established by default if explicit option isn't set. For compliance with existing applications not using SSL the verifyServerCertificate property is set to 'false'. You need either to explicitly disable SSL by setting useSSL=false, or set useSSL=true and provide truststore for server certificate verification.
+[                          main] DbCommandExecutor              INFO  Successfully connected to database.
+All done, your SCM database is configured correctly!
+```
+
+- **删除内嵌的 PostgreSQL 配置文件**（不一定需要）
+
+如果上述脚本执行成功，则删除内嵌的配置文件
+
+``` bash
+rm /etc/cloudera-scm-server/db.mgmt.properties
+```
+
+> **注意，这一步我并没有执行，因为我在这个目下没有找到这个配置文件，唯一一个配置文件打开后发现里面配置的我的 mysql 数据库，并且注释有写该文件是被之前执行的 scm_prepare_database.sh 脚本生成的，所以这里我只是将官方文档复制了过来，并不需要执行。**
+
+#### 5.4 配置 CDH parcel 包
+
+在启动 Cloudera Manager 后，我们会在 web 页面进行 CDH 的安装操作，但是安装 CDH 需要 CDH 的 parcel 包，这个包非常大，所以建议我们提前下载
+
+CDH 6.2.1 版本的下载地址：https://archive.cloudera.com/cdh6/6.2.1/parcels/
+
+我们一共需要下载四个文件：
+
+- **CDH-6.2.1-1.cdh6.2.1.p0.1425774-el7.parcel** - 必须下载，这个文件是 CDH 的安装包，里面基本包含了所有的服务，比如 hadoop，hive，impala 等等，大约 2G。
+- **CDH-6.2.1-1.cdh6.2.1.p0.1425774-el7.parcel.sha1** - 必须下载，其实这个文件可以手动生成，如果你下载下来打开看，其实是一个 hash 值，这个值在 manifest.json 文件里有记录，所以我们可以手动创建这个文件，然后把 manifest.json 里记录的 hash 值复制进去。
+- **CDH-6.2.1-1.cdh6.2.1.p0.1425774-el7.parcel.sha256** - 非必须，这个记录了 sha256 的值，应该是方便我们自己做完整性校验的，我下载下来也是为了校验一下 CDH parcel 文件完整性，手动计算了一下 sha256 的值，确定文件完整。
+- **manifest.json** - 必须下载，保存了所有包的信息。
+
+最终我们真正需要的只有三个文件：CDH-6.2.1-1.cdh6.2.1.p0.1425774-el7.parcel，CDH-6.2.1-1.cdh6.2.1.p0.1425774-el7.parcel.sha1，manifest.json
+
+这三个文件需要放到 parcel 的 repo 目录下：/opt/cloudera/parcel-repo
+
+这里需要注意，CDH-6.2.1-1.cdh6.2.1.p0.1425774-el7.parcel.sha1 这个文件必须重命名将后面的数字1去掉，否则 Cloudera Manager 识别不到，会重新下载 CDH 包
+
+``` bash
+mv CDH-6.2.1-1.cdh6.2.1.p0.1425774-el7.parcel.sha1 CDH-6.2.1-1.cdh6.2.1.p0.1425774-el7.parcel.sha
+```
+
+至此，我们已经完成了所有的配置工作，可以启动 Cloudera Manager 服务并安装 CDH 了。
+
+### 6. 启动 Cloudera Manager 并安装 CDH
+
+#### 6.1 启动 Cloudera Manager Server
+
+``` bash
+systemctl start cloudera-scm-server
+```
+
+启动需要一段时间，可以在 /var/log/cloudera-scm-server 目录下查看日志
+
+``` bash
+tail -f /var/log/cloudera-scm-server/cloudera-scm-server.log
+```
+
+当看到如下日志，即表示启动成功
+
+``` log
+2020-03-13 17:50:57,925 INFO WebServerImpl:org.eclipse.jetty.server.Server: Started @52848ms
+2020-03-13 17:50:57,925 INFO WebServerImpl:com.cloudera.server.cmf.WebServerImpl: Started Jetty server.
+```
+
+可以登陆 http://<server_host>:7180 进入 Cloudera Manager 界面
+
+#### 6.2 登陆 Cloudera Manager Admin Console
+
+- **登陆**
+
+  默认用户名和密码为：admin/admin
+![avatar](img/cdh-1-1.png)
+
+- **欢迎界面，继续**
+![avatar](img/cdh-1-2.png)
+
+- **接受 License 后选择安装版本**
+
+  这里选择 Cloudera Express 版本
+![avatar](img/cdh-1-3.png)
+
+#### 6.3 集群安装
+
+- **集群安装 welcome 界面**
+![avatar](img/cdh-2-1.png)
+
+- **一路下一步，走到指定 hosts界面**
+
+  在这个界面，需要搜索整个网络中你需要加入到集群当中的服务器，包括 Cloudera Manager Server 本身
+![avatar](img/cdh-2-2.png)
+
+- **选择存储库，也就是 repo**
+
+  这里我们选择 Public Cloudera Repository，因为我们已经下好了 parcel 包，所以不会被重复下载，自定义库需要进行搭建才行，剩下的选择默认配置
+![avatar](img/cdh-2-3.png)
+
+- **安装 JDK**
+
+  我们已经安装了 JDK，这里无需再次安装，不打勾点击继续
+![avatar](img/cdh-2-4.png)
+
+- **提供 SSH 登陆凭证**
+![avatar](img/cdh-2-5.png)
+
+- **安装 Agents**
+
+  一旦进入这一步，Cloudera Manager 会自动对你刚刚指定的所有 host 安装 Cloudera Manager Agent 服务。由于我们在之前就已经手动安装过了此服务，所以这一步将会很快结束。也就是说，实际上我们只需要在主节点安装 daemons 和 server 包就行，剩下的 agent 包在这一步会帮我们安装。不过前面的步骤顺手就安装了，如果集群多达几百个，前面确实可以省去每个节点安装 agent 包的步骤，交给这里负责安装。
+![avatar](img/cdh-2-6.png)
+
+- **安装 Parcels**
+
+  这里少截了一张图，在安装完成 agents 之后，会自动走到这一步，然后自动开始安装 CDH 的 parcel。由于我们已经将 parcel 包下载到指定的 parcel-repo 目录下，所以会直接跳过下载步骤，直接进行安装。
+
+- **安装完成**
+
+  选择第二个进入集群配置
+![avatar](img/cdh-2-8.png)
+
+#### 6.4 集群设置
+
+- **选择需要安装的服务**
+
+  我全都要。。。
+![avatar](img/cdh-3-1.png)
+
+- **按需分配各个服务的角色**
+![avatar](img/cdh-3-2.png)
+
+- **数据库设置**
+![avatar](img/cdh-3-3.png)
+
+- **审核更改**
+
+  忘记截图了，这个界面用于配置一些集群信息，比如 HDFS 块大小，NameNode  数据目录，DataNode 数据目录等等，我这里直接保持默认值不变进行下一步。
+
+- **自动开始运行**
+![avatar](img/cdh-3-5.png)
+
+- **完成**
+![avatar](img/cdh-3-6.png)
+
+
+#### 6.5 效果图
+
+![avatar](img/cdh-final.png)
+
+官方文档：https://docs.cloudera.com/documentation/enterprise/6/6.2/topics/installation.html
