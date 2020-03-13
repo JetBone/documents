@@ -503,9 +503,9 @@ repo 文件：cloudera-manager.repo
 
 ``` bash
 [cloudera-manager]
-name=Cloudera Manager 6.3.1
-baseurl=https://archive.cloudera.com/cm6/6.3.1/redhat7/yum/
-gpgkey=https://archive.cloudera.com/cm6/6.3.1/redhat7/yum/RPM-GPG-KEY-cloudera
+name=Cloudera Manager 6.2.1
+baseurl=https://archive.cloudera.com/cm6/6.2.1/redhat7/yum/
+gpgkey=https://archive.cloudera.com/cm6/6.2.1/redhat7/yum/RPM-GPG-KEY-cloudera
 gpgcheck=1
 enabled=1
 autorefresh=0
