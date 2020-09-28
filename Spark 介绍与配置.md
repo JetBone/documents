@@ -1,4 +1,13 @@
-# Spark 集群配置
+# SPARK 介绍与配置
+
+## 1. Spark 简单介绍
+
+Spark 是一种非常快速，通用的分布式计算系统。它提供了多种语言的高级 API ，比如 Java，Scala，Python 和 R。并且拥有许多非常高级的工具比如 Spark SQL 用于提供针对一些结构化数据的 SQL 操作支持，MLib 用于机器学习，GraphX 用于图形计算，和 Spark Streaming 用于流计算。
+
+### 1.1 Spark 简单概念
+
+
+## 2. Spark 配置
 
 spark配置后缀都是template，需要把我们需要的文件cp一份然后后缀的template删除掉
 
